@@ -1200,3 +1200,42 @@ input[type="range"] {
 .react-flow {
   background: var(--canvas) !important;
 }
+.action-list details {
+  border-bottom: 1px solid var(--border, #ddd);
+  padding: 10px 0;
+}
+.action-list summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px;
+}
+.node-context-menu {
+  background: var(--panel, white);
+  color: var(--text, #222);
+  border: 1px solid #aaa;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px #0003;
+  padding: 6px;
+  min-width: 220px;
+}
+.node-context-menu button {
+  display: block;
+  padding: 10px 14px;
+  width: 100%;
+  text-align: left;
+}
+.node-context-menu button:hover {
+  background: #6366f122;
+}
+.top-actions .autosave-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.top-actions .autosave-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}

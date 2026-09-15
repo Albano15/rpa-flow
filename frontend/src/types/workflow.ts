@@ -10,6 +10,15 @@ export const actionTypes = [
   "desktop.press_key",
   "desktop.ocr_extract",
   "flow.subroutine",
+  "desktop.focus_window",
+  "web.create_browser",
+  "web.select_element",
+  "web.type_text",
+  "web.click",
+  "http.request",
+  "flow.loop",
+  "flow.decision",
+  "flow.value",
 ] as const;
 export type ActionType = (typeof actionTypes)[number];
 export type Config = Record<string, unknown>;
@@ -48,6 +57,72 @@ export const catalog: Record<
   ActionType,
   { label: string; description: string; color: string; defaults: Config }
 > = {
+  "desktop.focus_window": {
+    label: "Focar janela",
+    description: "Ative uma janela pelo título",
+    color: "#6366f1",
+    defaults: { title: "" },
+  },
+  "web.create_browser": {
+    label: "Criar navegador",
+    description: "Crie uma sessão e uma aba para outras ações",
+    color: "#6366f1",
+    defaults: { url: "about:blank", headless: false },
+  },
+  "web.select_element": {
+    label: "Selecionar elemento do navegador",
+    description: "Localize um elemento por seletor CSS na aba escolhida",
+    color: "#6366f1",
+    defaults: { browser: "", selector: "" },
+  },
+  "web.type_text": {
+    label: "Digitar texto (Web)",
+    description: "Preencha um elemento na aba escolhida",
+    color: "#6366f1",
+    defaults: { browser: "", selector: "", text: "" },
+  },
+  "web.click": {
+    label: "Clicar em elemento (Web)",
+    description: "Clique em um elemento na aba escolhida",
+    color: "#6366f1",
+    defaults: { browser: "", selector: "" },
+  },
+  "http.request": {
+    label: "Chamar API",
+    description: "Armazene status, headers e body para outras ações",
+    color: "#6366f1",
+    defaults: {
+      method: "GET",
+      endpoint: "",
+      body: {},
+      headers: {},
+      timeout_sec: 30,
+    },
+  },
+  "flow.loop": {
+    label: "Loop",
+    description: "Repita uma sub-rotina pelo número informado",
+    color: "#6366f1",
+    defaults: { times: 1, subroutine_id: "" },
+  },
+  "flow.decision": {
+    label: "Decisão",
+    description: "Compare valores e execute a sub-rotina correspondente",
+    color: "#6366f1",
+    defaults: {
+      left: "",
+      operator: "equals",
+      right: "",
+      then_subroutine_id: "",
+      else_subroutine_id: "",
+    },
+  },
+  "flow.value": {
+    label: "Pegar valor",
+    description: "Defina um valor ou reutilize o retorno de uma ação",
+    color: "#6366f1",
+    defaults: { value: "" },
+  },
   "desktop.open_app": {
     label: "Abrir Programa",
     description: "Inicie um aplicativo desktop",
@@ -97,7 +172,7 @@ export const catalog: Record<
     },
   },
   "desktop.type_text": {
-    label: "Escrever Texto",
+    label: "Digitar texto (Desktop)",
     description: "Preencha campos com texto e variáveis",
     color: "#10b981",
     defaults: { text: "", interval_sec: 0.05, write_method: "paste" },
@@ -169,9 +244,52 @@ export function createWorkflow(
   };
 }
 const nonempty = z.string().trim().min(1);
+const reference = z.object({
+  source: z.literal("action"),
+  actionId: nonempty,
+  path: nonempty,
+  valueType: z.enum(["text", "number", "money"]),
+});
+const dynamic = z.union([z.string(), z.number().finite(), reference]);
 const nonnegative = z.number().finite().min(0);
 const positive = z.number().finite().positive();
 export const configSchemas: Record<ActionType, z.ZodType> = {
+  "desktop.focus_window": z.object({ title: nonempty }),
+  "web.create_browser": z.object({ url: nonempty, headless: z.boolean() }),
+  "web.select_element": z.object({ browser: nonempty, selector: nonempty }),
+  "web.type_text": z.object({
+    browser: nonempty,
+    selector: nonempty,
+    text: dynamic,
+  }),
+  "web.click": z.object({ browser: nonempty, selector: nonempty }),
+  "http.request": z.object({
+    method: z.enum([
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "HEAD",
+      "OPTIONS",
+    ]),
+    endpoint: nonempty,
+    body: z.unknown(),
+    headers: z.record(z.string(), z.string()),
+    timeout_sec: positive,
+  }),
+  "flow.loop": z.object({
+    times: z.union([z.number().int().min(0), reference]),
+    subroutine_id: nonempty,
+  }),
+  "flow.decision": z.object({
+    left: dynamic,
+    right: dynamic,
+    operator: z.enum(["equals", "not_equals", "greater", "less", "contains"]),
+    then_subroutine_id: nonempty,
+    else_subroutine_id: z.string(),
+  }),
+  "flow.value": z.object({ value: dynamic }),
   "desktop.open_app": z.object({
     path: nonempty,
     args: z.array(z.string()),
@@ -194,7 +312,9 @@ export const configSchemas: Record<ActionType, z.ZodType> = {
     click_type: z.enum(["single", "double"]),
     delay_ms: nonnegative,
   }),
-  "desktop.wait_delay": z.object({ duration_ms: nonnegative }),
+  "desktop.wait_delay": z.object({
+    duration_ms: z.union([nonnegative, reference]),
+  }),
   "desktop.wait_image": z.object({
     image_asset: nonempty,
     confidence: z.number().min(0.7).max(1),
@@ -202,7 +322,7 @@ export const configSchemas: Record<ActionType, z.ZodType> = {
     interval_sec: positive,
   }),
   "desktop.type_text": z.object({
-    text: nonempty,
+    text: dynamic,
     interval_sec: nonnegative,
     write_method: z.enum(["paste", "typewrite"]),
   }),
@@ -266,7 +386,7 @@ export const astSchema = z
           retry_policy: z
             .object({
               max_attempts: positive.int(),
-              delay_seconds: nonnegative,
+              delay_seconds: z.number().finite().min(0),
             })
             .optional(),
           outputs: z.record(z.string(), z.string()).optional(),
@@ -281,6 +401,7 @@ export const astSchema = z
           label: nonempty,
           node_ids: z.array(z.string()),
           collapsed: z.boolean(),
+          parent_id: z.string().optional(),
         })
         .strict(),
     ),
@@ -318,7 +439,35 @@ export function exportWorkflow(w: Workflow) {
   }
   if (ordered.length !== actions.length)
     throw new Error("Há ações desconectadas ou um ciclo.");
+  const available = new Set<string>();
   for (const n of ordered) {
+    const checkReferences = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      const record = value as Record<string, unknown>;
+      if (record.source === "action" && !available.has(String(record.actionId)))
+        throw new Error(
+          `${n.data.customLabel}: o resultado deve vir de uma ação anterior ativa.`,
+        );
+      Object.values(record).forEach(checkReferences);
+    };
+    if (n.data.enabled) {
+      checkReferences(n.data.config);
+      if (
+        n.data.action.startsWith("web.") &&
+        n.data.action !== "web.create_browser"
+      ) {
+        const browser = actions.find((a) => a.id === n.data.config.browser);
+        if (
+          !browser ||
+          browser.data.action !== "web.create_browser" ||
+          !available.has(browser.id)
+        )
+          throw new Error(
+            `${n.data.customLabel}: selecione um navegador criado anteriormente.`,
+          );
+      }
+      available.add(n.id);
+    }
     const issues = nodeIssues(n.data);
     if (n.data.enabled && issues.length)
       throw new Error(`${n.data.customLabel}: ${issues.join("; ")}`);
@@ -348,6 +497,7 @@ export function exportWorkflow(w: Workflow) {
         label: n.data.customLabel,
         node_ids: actions.filter((a) => a.parentId === n.id).map((a) => a.id),
         collapsed: (n.data as ScopeData).collapsed,
+        ...(n.parentId ? { parent_id: n.parentId } : {}),
       })),
   });
 }
@@ -401,6 +551,26 @@ export function importWorkflow(raw: unknown): Workflow {
       n.position = { x: 40, y: n.position.y - y + 60 };
     });
   }
+  for (const section of ast.sections) {
+    if (section.parent_id) {
+      const node = w.nodes.find((n) => n.id === section.id)!;
+      if (!ast.sections.some((p) => p.id === section.parent_id))
+        throw new Error("Seção pai inexistente.");
+      let parent: string | undefined = section.parent_id;
+      const seen = new Set([section.id]);
+      while (parent) {
+        if (seen.has(parent)) throw new Error("Ciclo de seções.");
+        seen.add(parent);
+        parent = ast.sections.find((s) => s.id === parent)?.parent_id;
+      }
+      node.parentId = section.parent_id;
+    }
+  }
+  const depth = (id: string): number => {
+    const p = w.nodes.find((n) => n.id === id)?.parentId;
+    return p ? 1 + depth(p) : 0;
+  };
+  w.nodes.sort((a, b) => depth(a.id) - depth(b.id));
   exportWorkflow(w);
   return w;
 }

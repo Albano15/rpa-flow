@@ -114,3 +114,43 @@ it("seleção não muda os metadados exportados e agrupamento inválido orienta 
   store.getState().group();
   expect(store.getState().notice).toContain("Selecione ao menos duas");
 });
+
+it("reconecta uma ou várias etapas removidas e desfaz atomicamente", () => {
+  store.getState().add("desktop.wait_delay");
+  store.getState().add("desktop.wait_delay");
+  const before = activeWorkflow(store.getState());
+  const [a, b, c, d] = before.nodes;
+  store.getState().nodesChanged([
+    { type: "remove", id: b.id },
+    { type: "remove", id: c.id },
+  ]);
+  expect(activeWorkflow(store.getState()).edges).toMatchObject([
+    { source: a.id, target: d.id },
+  ]);
+  store.temporal.getState().undo();
+  expect(activeWorkflow(store.getState()).edges).toEqual(before.edges);
+});
+
+it("aninha seções, impede ciclos e preserva filhos ao excluir o contêiner", () => {
+  store.getState().addScope({ x: 400, y: 0 });
+  const outer = activeWorkflow(store.getState()).nodes.at(-1)!;
+  store.getState().addScope({ x: 440, y: 70 });
+  const inner = activeWorkflow(store.getState()).nodes.at(-1)!;
+  store.getState().moveIntoScope(inner.id);
+  expect(
+    activeWorkflow(store.getState()).nodes.find((n) => n.id === inner.id)
+      ?.parentId,
+  ).toBe(outer.id);
+  store.getState().moveIntoScope(outer.id);
+  expect(
+    activeWorkflow(store.getState()).nodes.find((n) => n.id === outer.id)
+      ?.parentId,
+  ).toBeUndefined();
+  const ast = exportWorkflow(activeWorkflow(store.getState()));
+  expect(exportWorkflow(importWorkflow(ast))).toEqual(ast);
+  store.getState().nodesChanged([{ type: "remove", id: outer.id }]);
+  expect(
+    activeWorkflow(store.getState()).nodes.find((n) => n.id === inner.id)
+      ?.parentId,
+  ).toBeUndefined();
+});

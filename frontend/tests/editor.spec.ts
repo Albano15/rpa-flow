@@ -84,3 +84,67 @@ test("agrupamento e captura por upload com recorte", async ({ page }) => {
   await expect(page.getByAltText("Template capturado")).toBeVisible();
   await page.screenshot({ path: "/tmp/flowbot-light.png" });
 });
+
+test("exclusão reconecta; valores, tópicos e sincronização manual", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(page.locator(".action-node")).toHaveCount(3);
+  await page.locator(".action-node").nth(1).click();
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".action-node")).toHaveCount(2);
+  await expect(page.locator(".edge-add")).toHaveCount(1);
+  await page.locator(".action-node").first().click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Renomear" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Ativar / inativar" }).click();
+  await expect(page.locator(".action-node").first()).toContainText("Inativo");
+  await page.getByRole("button", { name: /Adicionar etapa/ }).click();
+  await expect(
+    page.getByRole("dialog").getByText("RPA Web", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Pegar valor/ })
+    .click();
+  await page.getByRole("button", { name: "Definir valor…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Tipo", { exact: true })
+    .selectOption("money");
+  await page
+    .getByRole("dialog")
+    .getByLabel("Valor", { exact: true })
+    .fill("1.234,56");
+  await page.getByRole("button", { name: "Usar valor" }).click();
+  await expect(
+    page.getByRole("button", { name: "1234.56", exact: true }),
+  ).toBeVisible();
+  let payload: unknown;
+  await page.route("/api/workspace", async (route) => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await expect(
+    page.getByText("Sincronizado com backend", { exact: true }),
+  ).toBeVisible();
+  expect(payload).toHaveProperty("workflow.nodes");
+  await page.getByLabel("Nome da etapa", { exact: true }).fill("Valor editado");
+  await expect(
+    page.getByText("Alterações não sincronizadas", { exact: true }),
+  ).toBeVisible();
+  const automatic = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/workspace") && request.method() === "POST",
+  );
+  await page.getByLabel("Autosalvamento", { exact: true }).check();
+  expect(
+    (await automatic).postDataJSON().workflow.nodes.at(-1).data.customLabel,
+  ).toBe("Valor editado");
+  await expect(
+    page.getByText("Sincronizado com backend", { exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});

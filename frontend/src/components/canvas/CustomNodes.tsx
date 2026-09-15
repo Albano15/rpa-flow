@@ -47,7 +47,7 @@ export const icons = {
   "flow.subroutine": Workflow,
 };
 export function ActionIcon({ action }: { action: ActionType }) {
-  const Icon = icons[action];
+  const Icon = icons[action as keyof typeof icons] ?? Workflow;
   return <Icon size={19} />;
 }
 export const ActionNode = memo(function ActionNode({
@@ -60,12 +60,24 @@ export const ActionNode = memo(function ActionNode({
     (s) => s.assets[String(data.config.image_asset)],
   );
   const issues = nodeIssues(data);
+  const displayValue = (value: unknown) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      "actionId" in value &&
+      "path" in value
+    )
+      return `Resultado: ${value.actionId} → ${value.path}`;
+    return String(value);
+  };
   const summary =
     data.action === "desktop.wait_delay"
-      ? `${Number(data.config.duration_ms) / 1000} s`
+      ? typeof data.config.duration_ms === "number"
+        ? `${data.config.duration_ms / 1000} s`
+        : displayValue(data.config.duration_ms)
       : data.action === "desktop.press_key"
         ? [...(data.config.modifiers as string[]), data.config.keys].join(" + ")
-        : String(
+        : displayValue(
             data.config.path ||
               data.config.text ||
               data.config.image_asset ||

@@ -42,6 +42,7 @@ type State = {
   nodesChanged: (changes: NodeChange<FlowNode>[]) => void;
   edgesChanged: (changes: EdgeChange[]) => void;
   group: () => void;
+  addScope: (position?: XYPosition) => void;
   layout: () => void;
   patch: (id: string, patch: Partial<ActionData>) => void;
   remove: () => void;
@@ -113,6 +114,7 @@ export const useWorkflowStore = create<State>()(
         }),
       add: (type, position) => {
         const insertion = get().palette;
+        let insertionAnchor: string | undefined;
         get().edit((w) => {
           const anchor = w.nodes.find((n) => n.id === insertion?.nodeId);
           let old = w.edges.find((e) => e.id === insertion?.edgeId);
@@ -122,6 +124,13 @@ export const useWorkflowStore = create<State>()(
                 ? e.target === anchor.id
                 : e.source === anchor.id,
             );
+          if (!old && !anchor) {
+            const tail = w.nodes.findLast(
+              (n) =>
+                n.type === "action" && !w.edges.some((e) => e.source === n.id),
+            );
+            if (tail) insertionAnchor = tail.id;
+          }
           const source = w.nodes.find((n) => n.id === old?.source);
           const n = createNode(
             type,
@@ -170,6 +179,8 @@ export const useWorkflowStore = create<State>()(
           if (old) {
             w.edges = w.edges.filter((e) => e.id !== old.id);
             w.edges.push(edge(old.source, n.id), edge(n.id, old.target));
+          } else if (insertionAnchor) {
+            w.edges.push(edge(insertionAnchor, n.id));
           } else if (anchor) {
             w.edges.push(
               insertion?.side === "before"
@@ -211,19 +222,10 @@ export const useWorkflowStore = create<State>()(
           const removed = new Set(
             changes.filter((c) => c.type === "remove").map((c) => c.id),
           );
-          w.nodes.forEach((n) => {
-            if (n.parentId && removed.has(n.parentId)) {
-              const p = w.nodes.find((p) => p.id === n.parentId)!;
-              n.position = {
-                x: n.position.x + p.position.x,
-                y: n.position.y + p.position.y,
-              };
-              delete n.parentId;
-            }
-          });
-          w.nodes = applyNodeChanges(changes, w.nodes);
-          w.edges = w.edges.filter(
-            (e) => !removed.has(e.source) && !removed.has(e.target),
+          deleteSteps(w, removed);
+          w.nodes = applyNodeChanges(
+            changes.filter((c) => c.type !== "remove"),
+            w.nodes,
           );
         }, !visual);
         if (visual && wasTracking)
@@ -239,18 +241,32 @@ export const useWorkflowStore = create<State>()(
           if (n?.type === "action") Object.assign(n.data, patch);
         }),
       remove: () =>
+        get().edit((w) =>
+          deleteSteps(
+            w,
+            new Set(w.nodes.filter((n) => n.selected).map((n) => n.id)),
+          ),
+        ),
+      addScope: (position = { x: 480, y: 80 }) => {
         get().edit((w) => {
-          const removed = new Set(
-            w.nodes.filter((n) => n.selected).map((n) => n.id),
-          );
-          w.nodes = w.nodes.filter(
-            (n) => !removed.has(n.id) && !removed.has(n.parentId ?? ""),
-          );
-          const ids = new Set(w.nodes.map((n) => n.id));
-          w.edges = w.edges.filter(
-            (e) => !e.selected && ids.has(e.source) && ids.has(e.target),
-          );
-        }),
+          w.nodes.forEach((n) => {
+            n.selected = false;
+          });
+          w.nodes.push({
+            id: uid("section"),
+            type: "scope",
+            position,
+            selected: true,
+            style: { width: 420, height: 320 },
+            data: {
+              customLabel: "Nova seção",
+              color: "#6366f1",
+              collapsed: false,
+            },
+          });
+        });
+        set({ palette: null });
+      },
       group: () => {
         if (
           activeWorkflow(get()).nodes.filter(
@@ -281,7 +297,13 @@ export const useWorkflowStore = create<State>()(
             },
             style: {
               width:
-                Math.max(...selected.map((n) => n.position.x + 290)) - x + 35,
+                Math.max(
+                  ...selected.map(
+                    (n) => n.position.x + Number(n.style?.width ?? 290),
+                  ),
+                ) -
+                x +
+                35,
               height:
                 Math.max(...selected.map((n) => n.position.y + 180)) - y + 35,
             },
@@ -309,7 +331,9 @@ export const useWorkflowStore = create<State>()(
               const p = graph.node(n.id);
               n.position = { x: p.x - 145, y: p.y - 85 };
             });
-          for (const scope of w.nodes.filter((n) => n.type === "scope")) {
+          for (const scope of w.nodes
+            .filter((n) => n.type === "scope")
+            .sort((a, b) => depth(w, b.id) - depth(w, a.id))) {
             const children = w.nodes.filter((n) => n.parentId === scope.id);
             if (!children.length) continue;
             const x = Math.min(...children.map((n) => n.position.x)) - 35,
@@ -317,9 +341,21 @@ export const useWorkflowStore = create<State>()(
             scope.position = { x, y };
             scope.style = {
               width:
-                Math.max(...children.map((n) => n.position.x + 290)) - x + 35,
+                Math.max(
+                  ...children.map(
+                    (n) => n.position.x + Number(n.style?.width ?? 290),
+                  ),
+                ) -
+                x +
+                35,
               height:
-                Math.max(...children.map((n) => n.position.y + 170)) - y + 35,
+                Math.max(
+                  ...children.map(
+                    (n) => n.position.y + Number(n.style?.height ?? 170),
+                  ),
+                ) -
+                y +
+                35,
             };
             children.forEach((n) => {
               n.position = { x: n.position.x - x, y: n.position.y - y };
@@ -352,36 +388,54 @@ export const useWorkflowStore = create<State>()(
       moveIntoScope: (id) =>
         get().edit((w) => {
           const n = w.nodes.find((n) => n.id === id);
-          if (!n || n.type !== "action") return;
-          const parent = w.nodes.find((p) => p.id === n.parentId);
-          const absolute = {
-            x: n.position.x + (parent?.position.x ?? 0),
-            y: n.position.y + (parent?.position.y ?? 0),
-          };
-          const scope = w.nodes.find(
-            (p) =>
-              p.type === "scope" &&
-              !p.data.collapsed &&
-              absolute.x >= p.position.x &&
-              absolute.y >= p.position.y &&
-              absolute.x <= p.position.x + Number(p.style?.width ?? 380) &&
-              absolute.y <= p.position.y + Number(p.style?.height ?? 250),
-          );
+          if (!n) return;
+          const absolute = absolutePosition(w, n.id);
+          const scopes = w.nodes
+            .filter(
+              (p) =>
+                p.type === "scope" &&
+                p.id !== id &&
+                !isWithin(w, p.id, id) &&
+                !p.data.collapsed,
+            )
+            .reverse();
+          const scope = scopes.find((p) => {
+            const pos = absolutePosition(w, p.id);
+            return (
+              absolute.x >= pos.x &&
+              absolute.y >= pos.y &&
+              absolute.x <= pos.x + Number(p.style?.width ?? 420) &&
+              absolute.y <= pos.y + Number(p.style?.height ?? 320)
+            );
+          });
           if (scope) {
+            const pos = absolutePosition(w, scope.id);
             n.parentId = scope.id;
             n.position = {
-              x: absolute.x - scope.position.x,
-              y: absolute.y - scope.position.y,
+              x: Math.max(25, absolute.x - pos.x),
+              y: Math.max(60, absolute.y - pos.y),
             };
-            scope.style = {
-              ...scope.style,
-              width: Math.max(Number(scope.style?.width), n.position.x + 325),
-              height: Math.max(Number(scope.style?.height), n.position.y + 215),
-            };
+            let child = n;
+            while (child.parentId) {
+              const parent = w.nodes.find((p) => p.id === child.parentId)!;
+              parent.style = {
+                ...parent.style,
+                width: Math.max(
+                  Number(parent.style?.width ?? 420),
+                  child.position.x + Number(child.style?.width ?? 290) + 35,
+                ),
+                height: Math.max(
+                  Number(parent.style?.height ?? 320),
+                  child.position.y + Number(child.style?.height ?? 180) + 35,
+                ),
+              };
+              child = parent;
+            }
           } else {
             delete n.parentId;
             n.position = absolute;
           }
+          w.nodes.sort((a, b) => depth(w, a.id) - depth(w, b.id));
         }),
     })),
     {
@@ -418,4 +472,50 @@ export function endDrag() {
   dragSnapshot = undefined;
   useWorkflowStore.temporal.getState().resume();
   useWorkflowStore.setState({ workflows: result });
+}
+
+export function isWithin(w: Workflow, id: string, parentId: string): boolean {
+  const parent = w.nodes.find((n) => n.id === id)?.parentId;
+  return !!parent && (parent === parentId || isWithin(w, parent, parentId));
+}
+function depth(w: Workflow, id: string): number {
+  const p = w.nodes.find((n) => n.id === id)?.parentId;
+  return p ? 1 + depth(w, p) : 0;
+}
+export function absolutePosition(w: Workflow, id: string): XYPosition {
+  const n = w.nodes.find((n) => n.id === id)!;
+  const p = n.parentId ? absolutePosition(w, n.parentId) : { x: 0, y: 0 };
+  return { x: n.position.x + p.x, y: n.position.y + p.y };
+}
+function deleteSteps(w: Workflow, removed: Set<string>) {
+  // Removing an organizational section preserves its contents and absolute positions.
+  const positions = new Map(
+    w.nodes.map((n) => [n.id, absolutePosition(w, n.id)]),
+  );
+  const bridges = w.edges
+    .filter((e) => !removed.has(e.source) && removed.has(e.target))
+    .flatMap((e) => {
+      let target: string | undefined = e.target;
+      const seen = new Set<string>();
+      while (target && removed.has(target) && !seen.has(target)) {
+        seen.add(target);
+        target = w.edges.find((next) => next.source === target)?.target;
+      }
+      return target && !removed.has(target) ? [edge(e.source, target)] : [];
+    });
+  for (const n of w.nodes)
+    if (n.parentId && removed.has(n.parentId)) {
+      let parent = w.nodes.find((p) => p.id === n.parentId)?.parentId;
+      while (parent && removed.has(parent))
+        parent = w.nodes.find((p) => p.id === parent)?.parentId;
+      n.parentId = parent;
+      const pos = positions.get(n.id)!,
+        base = parent ? positions.get(parent)! : { x: 0, y: 0 };
+      n.position = { x: pos.x - base.x, y: pos.y - base.y };
+    }
+  w.nodes = w.nodes.filter((n) => !removed.has(n.id));
+  w.edges = [
+    ...w.edges.filter((e) => !removed.has(e.source) && !removed.has(e.target)),
+    ...bridges,
+  ];
 }

@@ -13,25 +13,55 @@ export function ActionList({ query = "" }: { query?: string }) {
   );
   return (
     <div className="action-list">
-      {filtered.map((t) => (
-        <button
-          key={t}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("application/rpa-action", t);
-            e.dataTransfer.effectAllowed = "copy";
-          }}
-          onClick={() => add(t)}
-        >
-          <span className="catalog-icon" style={{ color: catalog[t].color }}>
-            <ActionIcon action={t} />
-          </span>
-          <span>
-            <strong>{catalog[t].label}</strong>
-            <small>{catalog[t].description}</small>
-          </span>
-          <ArrowUpRight size={13} />
-        </button>
+      {[
+        ["desktop", "RPA Desktop"],
+        ["web", "RPA Web"],
+        ["http", "API e integrações"],
+        ["flow", "Fluxo e valores"],
+      ].map(([prefix, label]) => (
+        <details key={prefix} open>
+          <summary>{label}</summary>
+          {prefix === "flow" && (
+            <button
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(
+                  "application/rpa-action",
+                  "flow.section",
+                );
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              onClick={() => useWorkflowStore.getState().addScope()}
+            >
+              ＋ Seção — organizar ações e outras seções
+            </button>
+          )}
+          {filtered
+            .filter((t) => t.startsWith(prefix + "."))
+            .map((t) => (
+              <button
+                key={t}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/rpa-action", t);
+                  e.dataTransfer.effectAllowed = "copy";
+                }}
+                onClick={() => add(t)}
+              >
+                <span
+                  className="catalog-icon"
+                  style={{ color: catalog[t].color }}
+                >
+                  <ActionIcon action={t} />
+                </span>
+                <span>
+                  <strong>{catalog[t].label}</strong>
+                  <small>{catalog[t].description}</small>
+                </span>
+                <ArrowUpRight size={13} />
+              </button>
+            ))}
+        </details>
       ))}
       {!filtered.length && <p className="empty">Nenhuma ação encontrada.</p>}
     </div>

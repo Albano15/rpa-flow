@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -36,6 +36,7 @@ import {
 import { useStore } from "zustand";
 import {
   activeWorkflow,
+  isWithin,
   beginDrag,
   endDrag,
   useWorkflowStore,
@@ -63,6 +64,50 @@ function Editor() {
   const s = useWorkflowStore();
   const w = useWorkflowStore(activeWorkflow);
   const rf = useReactFlow();
+  const [context, setContext] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [autoSave, setAutoSave] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("Não sincronizado");
+  const [syncedDocument, setSyncedDocument] = useState("");
+  const saveQueue = useRef(Promise.resolve());
+  const synchronize = (document: WorkflowDocument) => {
+    setSyncStatus("Sincronizando…");
+    saveQueue.current = saveQueue.current
+      .catch(() => {})
+      .then(async () => {
+        try {
+          const response = await fetch("/api/workspace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflow: document,
+              assets: useWorkflowStore.getState().assets,
+            }),
+          });
+          if (!response.ok)
+            throw new Error("Falha ao sincronizar com o backend");
+          setSyncedDocument(JSON.stringify(document));
+          setSyncStatus("Sincronizado com backend");
+        } catch (error) {
+          setSyncStatus(String(error));
+        }
+      });
+  };
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setAutoSave(localStorage.getItem("flowbot.autosave") === "true"),
+      0,
+    );
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!autoSave) return;
+    const timer = setTimeout(() => synchronize(w), 900);
+    return () => clearTimeout(timer);
+  }, [autoSave, w]);
   const [sidebar, setSidebar] = useState(true);
   const [variables, setVariables] = useState(false);
   const [ready, setReady] = useState(false);
@@ -187,35 +232,34 @@ function Editor() {
     );
     return () => clearTimeout(timer);
   }, [ready, w.id, w.nodes.length, rf]);
-  const nodes = useMemo(
-    () =>
-      w.nodes.map((n) => {
-        if (n.type === "scope" && n.data.collapsed)
-          return { ...n, style: { ...n.style, width: 350, height: 100 } };
-        const p = w.nodes.find((p) => p.id === n.parentId);
-        return { ...n, hidden: p?.type === "scope" && p.data.collapsed };
-      }),
-    [w.nodes],
-  );
-  const edges = useMemo(
-    () =>
-      w.edges.map((e) => {
-        const source = w.nodes.find((n) => n.id === e.source),
-          target = w.nodes.find((n) => n.id === e.target);
-        const sp = w.nodes.find((n) => n.id === source?.parentId),
-          tp = w.nodes.find((n) => n.id === target?.parentId);
-        const a = sp?.type === "scope" && sp.data.collapsed ? sp.id : e.source,
-          b = tp?.type === "scope" && tp.data.collapsed ? tp.id : e.target;
-        return {
-          ...e,
-          source: a,
-          target: b,
-          hidden: a === b,
-          type: a !== e.source || b !== e.target ? "default" : "insert",
-        };
-      }),
-    [w.nodes, w.edges],
-  );
+  const visibleId = (id: string): string => {
+    const node = w.nodes.find((n) => n.id === id);
+    if (!node?.parentId) return id;
+    const parent = w.nodes.find((n) => n.id === node.parentId);
+    const outer = visibleId(node.parentId);
+    return outer !== node.parentId ||
+      (parent?.type === "scope" && parent.data.collapsed)
+      ? outer
+      : id;
+  };
+  const nodes = w.nodes.map((n) => ({
+    ...n,
+    hidden: visibleId(n.id) !== n.id,
+    ...(n.type === "scope" && n.data.collapsed
+      ? { style: { ...n.style, width: 350, height: 100 } }
+      : {}),
+  }));
+  const edges = w.edges.map((e) => {
+    const source = visibleId(e.source),
+      target = visibleId(e.target);
+    return {
+      ...e,
+      source,
+      target,
+      hidden: source === target,
+      type: source !== e.source || target !== e.target ? "default" : "insert",
+    };
+  });
   const exportJSON = async () => {
     try {
       await exportFiles(w, s.workflows, s.assets);
@@ -243,6 +287,27 @@ function Editor() {
           <strong>{w.name}</strong>
         </div>
         <div className="top-actions">
+          <label className="autosave-option">
+            <input
+              type="checkbox"
+              checked={autoSave}
+              onChange={(e) => {
+                setAutoSave(e.target.checked);
+                localStorage.setItem(
+                  "flowbot.autosave",
+                  String(e.target.checked),
+                );
+              }}
+            />{" "}
+            Autosalvamento
+          </label>
+          <button onClick={() => synchronize(w)}>Salvar</button>
+          <small role="status">
+            {syncStatus === "Sincronizado com backend" &&
+            syncedDocument !== JSON.stringify(w)
+              ? "Alterações não sincronizadas"
+              : syncStatus}
+          </small>
           <span className="save-status">
             {saved ? <Check size={14} /> : <span className="ready-dot" />}
             {saved ? "Salvo neste navegador" : "Salvando…"}
@@ -370,6 +435,21 @@ function Editor() {
                 edges={edges as Edge[]}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
+                onNodeContextMenu={(event, node) => {
+                  event.preventDefault();
+                  setContext({
+                    id: node.id,
+                    x: Math.min(event.clientX, window.innerWidth - 240),
+                    y: Math.min(event.clientY, window.innerHeight - 260),
+                  });
+                }}
+                onPaneClick={() => setContext(null)}
+                onBeforeDelete={async ({ nodes }) => {
+                  s.nodesChanged(
+                    nodes.map((n) => ({ type: "remove" as const, id: n.id })),
+                  );
+                  return false;
+                }}
                 onNodesChange={(c) =>
                   s.nodesChanged(c as Parameters<typeof s.nodesChanged>[0])
                 }
@@ -408,7 +488,11 @@ function Editor() {
                   const type = e.dataTransfer.getData(
                     "application/rpa-action",
                   ) as ActionType;
-                  if (actionTypes.includes(type))
+                  if (String(type) === "flow.section")
+                    s.addScope(
+                      rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+                    );
+                  else if (actionTypes.includes(type))
                     s.add(
                       type,
                       rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
@@ -429,7 +513,7 @@ function Editor() {
                 />
                 <Panel position="top-left">
                   <div className="canvas-label">
-                    <Monitor size={13} /> DESKTOP AUTOMATION <span>v1.0.0</span>
+                    <Monitor size={13} /> WEB & DESKTOP <span>v1.0.0</span>
                   </div>
                 </Panel>
                 {!w.nodes.length && (
@@ -467,6 +551,95 @@ function Editor() {
         </main>
         <NodeProperties />
       </div>
+      {context && (
+        <div
+          className="node-context-menu"
+          role="menu"
+          style={{
+            position: "fixed",
+            left: context.x,
+            top: context.y,
+            zIndex: 1000,
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setContext(null);
+          }}
+        >
+          <button
+            role="menuitem"
+            onClick={() => {
+              const node = w.nodes.find((n) => n.id === context.id);
+              const name = window.prompt(
+                "Nome da etapa ou seção",
+                node?.data.customLabel,
+              );
+              if (name?.trim())
+                s.edit((w) => {
+                  w.nodes.find((n) => n.id === context.id)!.data.customLabel =
+                    name.trim();
+                });
+              setContext(null);
+            }}
+          >
+            Renomear
+          </button>
+          {w.nodes.find((n) => n.id === context.id)?.type === "scope" && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                s.edit((w) => {
+                  const n = w.nodes.find((n) => n.id === context.id);
+                  if (n?.type === "scope") n.data.collapsed = !n.data.collapsed;
+                });
+                setContext(null);
+              }}
+            >
+              Recolher / expandir
+            </button>
+          )}
+          <button
+            role="menuitem"
+            onClick={() => {
+              s.edit((w) => {
+                const targets = w.nodes.filter(
+                  (n) =>
+                    n.type === "action" &&
+                    (n.id === context.id || isWithin(w, n.id, context.id)),
+                );
+                const enabled = !targets.some(
+                  (n) => n.type === "action" && n.data.enabled,
+                );
+                targets.forEach((n) => {
+                  if (n.type === "action") n.data.enabled = enabled;
+                });
+              });
+              setContext(null);
+            }}
+          >
+            Ativar / inativar
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              useWorkflowStore.setState({
+                palette: { nodeId: context.id, side: "after" },
+              });
+              setContext(null);
+            }}
+          >
+            Adicionar depois
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              s.nodesChanged([{ type: "remove", id: context.id }]);
+              setContext(null);
+            }}
+          >
+            Excluir
+          </button>
+        </div>
+      )}
       <ActionPalette />
       <ScreenSnipModal />
       <VariableManagerModal

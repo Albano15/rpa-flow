@@ -1,4 +1,5 @@
 /* eslint-disable @next/next/no-img-element -- Templates locais em data URLs precisam de pixels originais para o recorte. */
+import { ValueField } from "../modals/ValueField";
 import { useState } from "react";
 import {
   Settings2,
@@ -53,6 +54,21 @@ export function JsonField({
   );
 }
 const labels: Record<string, string> = {
+  browser: "Navegador / aba",
+  selector: "Seletor CSS",
+  title: "Título da janela",
+  url: "URL inicial",
+  method: "Método HTTP",
+  endpoint: "Endpoint",
+  body: "Body (JSON)",
+  headers: "Headers (JSON)",
+  times: "Número de vezes",
+  left: "Valor à esquerda",
+  right: "Valor à direita",
+  operator: "Comparação",
+  value: "Valor",
+  then_subroutine_id: "Se verdadeiro",
+  else_subroutine_id: "Se falso (opcional)",
   path: "Caminho do executável",
   args: "Argumentos (um por linha)",
   cwd: "Diretório de trabalho",
@@ -82,6 +98,8 @@ const labels: Record<string, string> = {
   inputs: "Parâmetros de entrada (JSON)",
 };
 const options: Record<string, string[]> = {
+  method: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+  operator: ["equals", "not_equals", "greater", "less", "contains"],
   button: ["left", "right", "middle"],
   click_type: ["single", "double"],
   write_method: ["paste", "typewrite"],
@@ -158,6 +176,43 @@ export function NodeProperties() {
     patch(node.id, { config: { ...config, [key]: value } });
   const issues = nodeIssues(data);
   const field = (key: string, value: unknown) => {
+    if (
+      ["text", "value", "times", "left", "right", "duration_ms"].includes(key)
+    )
+      return (
+        <ValueField
+          key={`${node.id}-${key}`}
+          nodeId={node.id}
+          label={labels[key] ?? key}
+          value={value}
+          onChange={(v) => update(key, v)}
+        />
+      );
+    if (key === "browser")
+      return (
+        <label className="field" key={key}>
+          Navegador / aba
+          <select
+            value={String(value)}
+            onChange={(e) => update(key, e.target.value)}
+          >
+            <option value="">Selecione o navegador criado…</option>
+            {w.nodes
+              .filter(
+                (n) =>
+                  n.type === "action" &&
+                  n.data.action === "web.create_browser" &&
+                  n.id !== node.id,
+              )
+              .map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.data.customLabel}
+                </option>
+              ))}
+          </select>
+        </label>
+      );
+
     if (key === "image_asset")
       return (
         <div className="field" key={key}>
@@ -181,10 +236,14 @@ export function NodeProperties() {
           </small>
         </div>
       );
-    if (key === "subroutine_id")
+    if (
+      ["subroutine_id", "then_subroutine_id", "else_subroutine_id"].includes(
+        key,
+      )
+    )
       return (
         <label className="field" key={key}>
-          Fluxo da sub-rotina
+          {labels[key] ?? "Fluxo da sub-rotina"}
           <select
             value={String(value)}
             onChange={(e) => update(key, e.target.value)}

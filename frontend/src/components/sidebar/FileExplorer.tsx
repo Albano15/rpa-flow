@@ -222,7 +222,7 @@ export function FileExplorer() {
           className={tab === "actions" ? "active" : ""}
           onClick={() => setTab("actions")}
         >
-          Ações <span>9</span>
+          Ações <span>19</span>
         </button>
       </div>
       <div className="search">

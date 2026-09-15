@@ -23,14 +23,18 @@ export async function exportFiles(
     if (visited.has(w.id)) return;
     visiting.add(w.id);
     for (const n of w.nodes) {
-      if (
-        n.type === "action" &&
-        n.data.enabled &&
-        n.data.action === "flow.subroutine"
-      ) {
+      if (n.type !== "action" || !n.data.enabled) continue;
+      const keys =
+        n.data.action === "flow.decision"
+          ? ["then_subroutine_id", "else_subroutine_id"]
+          : ["flow.subroutine", "flow.loop"].includes(n.data.action)
+            ? ["subroutine_id"]
+            : [];
+      for (const key of keys) {
+        const id = n.data.config[key];
+        if (!id && key === "else_subroutine_id") continue;
         const sub = workflows.find(
-          (w) =>
-            w.id === n.data.config.subroutine_id && w.kind === "subroutine",
+          (w) => w.id === id && w.kind === "subroutine",
         );
         if (!sub)
           throw new Error(`Sub-rotina não encontrada: ${n.data.customLabel}`);
