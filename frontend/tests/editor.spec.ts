@@ -1,4 +1,43 @@
 import { expect, test } from "@playwright/test";
+import { createWorkflow, createNode } from "../src/types/workflow";
+
+test.beforeEach(async ({ page }) => {
+  const workflow = createWorkflow("Emissão de nota fiscal");
+  workflow.id = "wf_faturamento";
+  workflow.nodes = [
+    createNode("desktop.open_app", { x: 0, y: 0 }),
+    createNode("desktop.wait_delay", { x: 0, y: 0 }),
+    createNode("desktop.type_text", { x: 0, y: 0 }),
+  ];
+  if (workflow.nodes[0].type === "action")
+    workflow.nodes[0].data.config.path = "C:/ERP.exe";
+  if (workflow.nodes[2].type === "action")
+    workflow.nodes[2].data.config.text = "operador";
+  workflow.edges = workflow.nodes.slice(1).map((n, i) => ({
+    id: `e${i}`,
+    source: workflow.nodes[i].id,
+    target: n.id,
+    type: "insert",
+  }));
+  await page.addInitScript(
+    (value) => {
+      if (!localStorage.getItem("flowbot.workspace.v1"))
+        localStorage.setItem("flowbot.workspace.v1", JSON.stringify(value));
+    },
+    {
+      workflows: [workflow],
+      assets: {},
+      folders: [{ id: "root", name: "Workspace", parentId: null }],
+      activeId: workflow.id,
+      dark: false,
+    },
+  );
+  await page.route("**/api/workspace", async (route) => {
+    if (route.request().method() === "GET")
+      await route.fulfill({ json: { workflows: [], assets: {}, folders: [] } });
+    else await route.continue();
+  });
+});
 test("editor: propriedades, inserção, histórico, exportação e persistência", async ({
   page,
 }) => {
@@ -174,15 +213,15 @@ test("início, fim e sub-rotinas permanecem alinhados com conexões retas", asyn
   for (const path of paths) {
     expect(path).not.toMatch(/[CQ]/);
     const numbers = path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
-    expect(numbers[0]).toBeCloseTo(numbers[2], 2);
-    expect(numbers[3]).toBeGreaterThan(numbers[1]);
+    expect(numbers[1]).toBeCloseTo(numbers[3], 2);
+    expect(numbers[2]).toBeGreaterThan(numbers[0]);
   }
   const centers = await page
     .locator(".action-node, .terminal-node")
     .evaluateAll((elements) =>
       elements.map((el) => {
         const b = el.getBoundingClientRect();
-        return b.x + b.width / 2;
+        return b.y + b.height / 2;
       }),
     );
   expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(1);
@@ -201,7 +240,9 @@ test("seção cresce automaticamente e arrastar uma etapa define apenas sua posi
     .click();
   const section = page.locator(".scope-node");
   await expect(section).toBeVisible();
-  const before = await section.boundingBox();
+  const before = await section.evaluate(
+    (el) => (el as HTMLElement).offsetHeight,
+  );
   await section.getByTitle("Adicionar dentro da seção").click();
   await page
     .getByRole("dialog")
@@ -209,8 +250,10 @@ test("seção cresce automaticamente e arrastar uma etapa define apenas sua posi
     .click();
   await expect(page.locator(".action-node")).toHaveCount(4);
   await expect
-    .poll(async () => (await section.boundingBox())!.height)
-    .toBeGreaterThan(before!.height);
+    .poll(async () =>
+      section.evaluate((el) => (el as HTMLElement).offsetHeight),
+    )
+    .toBeGreaterThan(before);
   const handle = page
     .locator(".action-node")
     .first()
@@ -224,7 +267,12 @@ test("seção cresce automaticamente e arrastar uma etapa define apenas sua posi
           .getBoundingClientRect();
         return elements.filter((el) => {
           const b = el.getBoundingClientRect();
-          return b.top >= section.top && b.bottom <= section.bottom;
+          return (
+            b.top >= section.top &&
+            b.bottom <= section.bottom &&
+            b.left >= section.left &&
+            b.right <= section.right
+          );
         }).length;
       }),
     )
@@ -234,4 +282,85 @@ test("seção cresce automaticamente e arrastar uma etapa define apenas sua posi
   await section.getByTitle("Expandir seção").click();
   await expect(page.locator(".action-node")).toHaveCount(4);
   await page.screenshot({ path: "/tmp/flowbot-linear-section.png" });
+});
+
+test("novo fluxo apresenta início, adicionar ação e fim na horizontal", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByTitle("Nova automação", { exact: true }).click();
+  await expect(page.locator(".action-node")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Adicionar ação", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Adicionar ação", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Aguardar Tempo/ })
+    .click();
+  await expect(page.locator(".action-node")).toHaveCount(1);
+  await expect(page.locator(".placeholder-node")).toHaveCount(0);
+});
+
+test("etapa adicionada na conexão da seção ao fim fica fora da seção", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByTitle("Nova automação", { exact: true }).click();
+  await page.locator(".add-step").click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Seção — organizar/ })
+    .click();
+  await page.getByTitle("Adicionar dentro da seção").click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Aguardar Tempo/ })
+    .click();
+  await expect(page.locator(".action-node")).toHaveCount(1);
+  await page.locator(".edge-add").last().click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Aguardar Tempo/ })
+    .click();
+  await expect(page.locator(".action-node")).toHaveCount(2);
+  await page.getByTitle("Minimizar seção").click();
+  await expect(page.locator(".action-node")).toHaveCount(1);
+});
+
+test("salva no backend Python e restaura o banco sem armazenamento local", async ({
+  page,
+}) => {
+  await page.unroute("**/api/workspace");
+  await page.goto("/");
+  await page.getByTitle("Nova automação", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Adicionar ação", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Aguardar Tempo/ })
+    .click();
+  await page
+    .getByLabel("Nome da etapa", { exact: true })
+    .fill("Carregada do banco Python");
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await expect(
+    page.getByText("Sincronizado com backend", { exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator(".action-node")).toContainText(
+    "Carregada do banco Python",
+  );
+  const response = await page.request.get("/api/workspace");
+  expect(response.ok()).toBeTruthy();
+  expect(
+    (await response.json()).workflows.some(
+      (w: { nodes: { data: { customLabel: string } }[] }) =>
+        w.nodes.some((n) => n.data.customLabel === "Carregada do banco Python"),
+    ),
+  ).toBeTruthy();
 });

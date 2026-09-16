@@ -1,0 +1,179 @@
+{
+  "workflow": {
+    "id": "wf_faturamento",
+    "name": "Emissão de nota fiscal",
+    "nodes": [
+      {
+        "id": "section_c9a3e78f56f5",
+        "type": "scope",
+        "position": {
+          "x": -100.84856403404459,
+          "y": -0.20468165173893027
+        },
+        "data": {
+          "customLabel": "a",
+          "color": "#6366f1",
+          "collapsed": true
+        },
+        "selected": false,
+        "style": {
+          "width": 420,
+          "height": 845.1721751224009
+        },
+        "measured": {
+          "width": 350,
+          "height": 100
+        },
+        "dragging": false
+      },
+      {
+        "id": "step_67851b86195b",
+        "type": "action",
+        "position": {
+          "x": -75.46911891671401,
+          "y": 150.62166839598663
+        },
+        "data": {
+          "action": "web.select_element",
+          "customLabel": "Selecionar elemento do navegador",
+          "enabled": true,
+          "notes": "",
+          "color": "#6366f1",
+          "config": {
+            "browser": "",
+            "selector": ""
+          }
+        },
+        "selected": true,
+        "measured": {
+          "width": 290,
+          "height": 146
+        },
+        "dragging": false
+      },
+      {
+        "id": "step_2684f7dc84d6",
+        "type": "action",
+        "position": {
+          "x": 53.191348418061295,
+          "y": 400.1721751224008
+        },
+        "data": {
+          "action": "desktop.click_image",
+          "customLabel": "Clicar em Imagem",
+          "enabled": true,
+          "notes": "",
+          "color": "#0ea5e9",
+          "config": {
+            "image_asset": "assets/451989205f37ed4a4167cad7ab3e8fd43fcb0892db4ab53d2a09ba88154e97db.png",
+            "confidence": 0.92,
+            "button": "left",
+            "dx": 0,
+            "dy": 0,
+            "timeout_sec": 30
+          }
+        },
+        "selected": false,
+        "measured": {
+          "width": 290,
+          "height": 187
+        },
+        "dragging": false,
+        "parentId": "section_c9a3e78f56f5"
+      },
+      {
+        "id": "step_abrir_erp",
+        "type": "action",
+        "position": {
+          "x": 51.814890117253526,
+          "y": 60
+        },
+        "data": {
+          "action": "desktop.open_app",
+          "customLabel": "Abrir ERP Faturamento",
+          "enabled": true,
+          "notes": "",
+          "color": "#6366f1",
+          "config": {
+            "path": "{{sistema_path}}",
+            "args": [],
+            "cwd": "",
+            "wait_window": true,
+            "timeout_sec": 30
+          }
+        },
+        "measured": {
+          "width": 290,
+          "height": 145
+        },
+        "selected": false,
+        "dragging": false,
+        "parentId": "section_c9a3e78f56f5"
+      },
+      {
+        "id": "step_aguardar",
+        "type": "action",
+        "position": {
+          "x": 51.81489011725354,
+          "y": 240.74314525495353
+        },
+        "data": {
+          "action": "desktop.wait_delay",
+          "customLabel": "Aguardar inicialização",
+          "enabled": true,
+          "notes": "",
+          "color": "#d49a25",
+          "config": {
+            "duration_ms": 3000
+          }
+        },
+        "measured": {
+          "width": 290,
+          "height": 145
+        },
+        "selected": false,
+        "dragging": false,
+        "parentId": "section_c9a3e78f56f5"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_1",
+        "source": "step_abrir_erp",
+        "target": "step_aguardar",
+        "type": "insert"
+      },
+      {
+        "id": "edge_e7bd33ff3d3c",
+        "source": "step_aguardar",
+        "target": "step_2684f7dc84d6",
+        "type": "insert"
+      },
+      {
+        "id": "edge_57d7bd773c1e",
+        "source": "step_2684f7dc84d6",
+        "target": "step_67851b86195b",
+        "type": "insert"
+      }
+    ],
+    "kind": "workflow",
+    "folderId": "financeiro",
+    "description": "",
+    "metadata": {
+      "author": "Engenharia RPA",
+      "created_at": "2026-09-15T01:17:38.226Z",
+      "updated_at": "2026-09-15T02:04:07.903Z"
+    },
+    "variables": {
+      "usuario": "operador",
+      "sistema_path": "C:\\ERP\\Faturamento.exe"
+    },
+    "tags": [
+      "financeiro",
+      "desktop"
+    ]
+  },
+  "assets": {
+    "assets/451989205f37ed4a4167cad7ab3e8fd43fcb0892db4ab53d2a09ba88154e97db.png": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAYAAABWKLW/AAAAFUlEQVR4AWKavXDWfxhmYkACKBwAAAAA//9l2cbjAAAABklEQVQDABM6CIYRMF9EAAAAAElFTkSuQmCC"
+  }
+}

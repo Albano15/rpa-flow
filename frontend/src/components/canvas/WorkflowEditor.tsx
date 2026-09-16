@@ -53,7 +53,13 @@ import {
   orderedActions,
   sequenceEdges,
 } from "../../lib/linearLayout";
-import { ActionNode, GroupNode, InsertEdge, TerminalNode } from "./CustomNodes";
+import {
+  ActionNode,
+  GroupNode,
+  InsertEdge,
+  TerminalNode,
+  PlaceholderNode,
+} from "./CustomNodes";
 import { FileExplorer } from "../sidebar/FileExplorer";
 import { NodeProperties } from "../sidebar/NodeProperties";
 import { ActionPalette } from "../sidebar/ActionPalette";
@@ -64,6 +70,7 @@ const nodeTypes = {
   action: ActionNode,
   scope: GroupNode,
   terminal: TerminalNode,
+  placeholder: PlaceholderNode,
 };
 const edgeTypes = { insert: InsertEdge };
 const storageKey = "flowbot.workspace.v1";
@@ -77,6 +84,7 @@ function Editor() {
     y: number;
   } | null>(null);
   const [autoSave, setAutoSave] = useState(false);
+  const [ready, setReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Não sincronizado");
   const [syncedDocument, setSyncedDocument] = useState("");
   const saveQueue = useRef(Promise.resolve());
@@ -91,6 +99,9 @@ function Editor() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               workflow: document,
+              activeId: document.id,
+              workflows: useWorkflowStore.getState().workflows,
+              folders: useWorkflowStore.getState().folders,
               assets: useWorkflowStore.getState().assets,
             }),
           });
@@ -111,13 +122,12 @@ function Editor() {
     return () => clearTimeout(timer);
   }, []);
   useEffect(() => {
-    if (!autoSave) return;
+    if (!autoSave || !ready) return;
     const timer = setTimeout(() => synchronize(w), 900);
     return () => clearTimeout(timer);
-  }, [autoSave, w]);
+  }, [autoSave, ready, w, s.workflows]);
   const [sidebar, setSidebar] = useState(true);
   const [variables, setVariables] = useState(false);
-  const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState(true);
   const [zoom, setZoom] = useState(100);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -161,8 +171,53 @@ function Editor() {
           "Não foi possível restaurar o workspace local. O exemplo foi carregado.",
       });
     }
-    useWorkflowStore.temporal.getState().clear();
-    const readyTimer = setTimeout(() => setReady(true), 0);
+    let cancelled = false;
+    void fetch("/api/workspace")
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error("Não foi possível carregar o banco de dados");
+        const payload = (await response.json()) as {
+          activeId?: string;
+          workflows: WorkflowDocument[];
+          assets: Record<string, string>;
+          folders: Folder[];
+        };
+        if (cancelled) return;
+        if (payload.workflows.length) {
+          const state = useWorkflowStore.getState();
+          const activeId = payload.workflows.some(
+            (flow) => flow.id === (payload.activeId ?? state.activeId),
+          )
+            ? (payload.activeId ?? state.activeId)
+            : payload.workflows[0].id;
+          useWorkflowStore.setState({
+            workflows: payload.workflows,
+            assets: payload.assets,
+            ...(payload.folders.length ? { folders: payload.folders } : {}),
+            activeId,
+            tabs: [activeId],
+          });
+          setSyncStatus("Sincronizado com backend");
+          setSyncedDocument(
+            JSON.stringify(
+              payload.workflows.find((flow) => flow.id === activeId),
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled)
+          useWorkflowStore.setState({
+            notice:
+              "Backend indisponível. As alterações locais foram preservadas.",
+          });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          useWorkflowStore.temporal.getState().clear();
+          setReady(true);
+        }
+      });
     let timer: ReturnType<typeof setTimeout>;
     const unsubscribe = useWorkflowStore.subscribe((state, previous) => {
       if (
@@ -199,7 +254,7 @@ function Editor() {
     return () => {
       unsubscribe();
       clearTimeout(timer);
-      clearTimeout(readyTimer);
+      cancelled = true;
     };
   }, []);
   useEffect(() => {
@@ -273,16 +328,14 @@ function Editor() {
     const before = nodes.find(
       (n) =>
         n.type !== "terminal" &&
+        n.type !== "placeholder" &&
         !n.hidden &&
         n.id !== movingId &&
         !(movingId && isWithin(w, n.id, movingId)) &&
         n.parentId === parent?.id &&
-        absolute(n).y +
-          (n.type === "scope"
-            ? Number(n.style?.height)
-            : (n.measured?.height ?? 170)) /
-            2 >
-          point.y,
+        absolute(n).x +
+          (n.type === "scope" ? Number(n.style?.width) : 290) / 2 >
+          point.x,
     );
     return { parentId: parent?.id, beforeId: before?.id };
   };
@@ -298,6 +351,12 @@ function Editor() {
       });
     }
   };
+  if (!ready)
+    return (
+      <div className="editor-loading" role="status">
+        Carregando fluxos…
+      </div>
+    );
   return (
     <div className="editor-shell">
       <header className="topbar">
@@ -463,7 +522,8 @@ function Editor() {
                 edgeTypes={edgeTypes}
                 onNodeContextMenu={(event, node) => {
                   event.preventDefault();
-                  if (node.type === "terminal") return;
+                  if (node.type === "terminal" || node.type === "placeholder")
+                    return;
                   setContext({
                     id: node.id,
                     x: Math.min(event.clientX, window.innerWidth - 240),

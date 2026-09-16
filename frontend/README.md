@@ -6,9 +6,13 @@ Tailwind, Radix UI, Lucide, Zustand, Immer e zundo.
 ## Executar
 
 ```bash
+# Execute dentro de frontend, após preparar backend/venv na raiz:
 npm ci
-npm run dev
+RPA_PYTHON="$(pwd)/../backend/venv/bin/python" npm run dev
 ```
+
+O Next.js chama o backend Python automaticamente; não execute `backend/index.py`
+para iniciar o Studio. Veja a configuração em [backend/Readme.md](../backend/Readme.md).
 
 Abra http://localhost:3000. O exemplo inicial tem três etapas conectadas e pode ser editado.
 
@@ -82,3 +86,5 @@ AST válido e salva em `database/workflows/<workflow_id>.rpa.json`.
 
 Referências técnicas: [React Flow – subflows](https://reactflow.dev/learn/layouting/sub-flows)
 e [zundo](https://github.com/charkour/zundo).
+
+

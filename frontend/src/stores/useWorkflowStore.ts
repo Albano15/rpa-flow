@@ -25,6 +25,7 @@ import {
   type ActionData,
 } from "../types/workflow";
 export type Insertion = {
+  outside?: boolean;
   scopeId?: string;
   edgeId?: string;
   nodeId?: string;
@@ -59,28 +60,6 @@ type State = {
 const initial = createWorkflow("Emissão de nota fiscal");
 initial.id = "wf_faturamento";
 initial.folderId = "financeiro";
-initial.variables = {
-  usuario: "operador",
-  sistema_path: "C:\\ERP\\Faturamento.exe",
-};
-initial.tags = ["financeiro", "desktop"];
-const first = createNode("desktop.open_app", { x: 100, y: 70 });
-first.id = "step_abrir_erp";
-first.data.customLabel = "Abrir ERP Faturamento";
-first.data.config.path = "{{sistema_path}}";
-const second = createNode("desktop.wait_delay", { x: 100, y: 300 });
-second.id = "step_aguardar";
-second.data.customLabel = "Aguardar inicialização";
-second.data.config.duration_ms = 3000;
-const third = createNode("desktop.type_text", { x: 100, y: 530 });
-third.id = "step_usuario";
-third.data.customLabel = "Preencher usuário";
-third.data.config.text = "{{usuario}}";
-initial.nodes = [first, second, third];
-initial.edges = [
-  { id: "edge_1", source: first.id, target: second.id, type: "insert" },
-  { id: "edge_2", source: second.id, target: third.id, type: "insert" },
-];
 const edge = (source: string, target: string) => ({
   id: uid("edge"),
   source,
@@ -142,10 +121,11 @@ export const useWorkflowStore = create<State>()(
             if (members.length) index = ordered.indexOf(members.at(-1)!) + 1;
           }
           const n = createNode(type, { x: 0, y: 0 });
-          n.parentId =
-            insertion?.scopeId ??
-            (anchor?.type === "scope" ? anchor.parentId : anchor?.parentId) ??
-            w.nodes.find((n) => n.id === old?.target)?.parentId;
+          n.parentId = insertion?.outside
+            ? anchor?.parentId
+            : (insertion?.scopeId ??
+              (anchor?.type === "scope" ? anchor.parentId : anchor?.parentId) ??
+              w.nodes.find((n) => n.id === old?.target)?.parentId);
           w.nodes.forEach((n) => {
             n.selected = false;
           });
@@ -316,7 +296,16 @@ export const useWorkflowStore = create<State>()(
             if (node.type === "scope") node.style = arranged.style;
           }
         }),
-      moveBlock: (id, parentId, beforeId) =>
+      moveBlock: (id, parentId, beforeId) => {
+        const workflow = activeWorkflow(get());
+        if (
+          !workflow.nodes.some((n) => n.id === id) ||
+          parentId === id ||
+          (parentId &&
+            (isWithin(workflow, parentId, id) ||
+              workflow.nodes.find((n) => n.id === parentId)?.type !== "scope"))
+        )
+          return;
         get().edit((w) => {
           const node = w.nodes.find((n) => n.id === id);
           if (
@@ -345,7 +334,8 @@ export const useWorkflowStore = create<State>()(
           node.parentId = parentId;
           rest.splice(index, 0, ...moving);
           sequenceEdges(w, rest);
-        }),
+        });
+      },
       createFile: (kind, folderId = "root") => {
         const w = createWorkflow(
           kind === "workflow" ? "Nova automação" : "Nova sub-rotina",

@@ -89,7 +89,7 @@ export const ActionNode = memo(function ActionNode({
       className={`action-node ${selected ? "selected" : ""} ${!data.enabled ? "inactive" : ""}`}
       style={{ "--accent": data.color } as CSSProperties}
     >
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <button
         className="node-add before nodrag"
         title="Adicionar antes"
@@ -148,7 +148,7 @@ export const ActionNode = memo(function ActionNode({
           {data.notes && <StickyNote size={12} />}
         </span>
       </footer>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
       <button
         className="node-add after nodrag"
         title="Adicionar depois"
@@ -168,7 +168,7 @@ export function GroupNode({ id, data }: NodeProps<Node<ScopeData, "scope">>) {
       className="scope-node"
       style={{ "--accent": data.color } as CSSProperties}
     >
-      <Handle type="target" position={Position.Top} isConnectable={false} />
+      <Handle type="target" position={Position.Left} isConnectable={false} />
       <div className="scope-header">
         <MoveHandle id={id} />
         <span className="scope-dot" />
@@ -216,7 +216,7 @@ export function GroupNode({ id, data }: NodeProps<Node<ScopeData, "scope">>) {
       >
         <Plus size={14} /> Adicionar à seção
       </button>
-      <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>
   );
 }
@@ -276,7 +276,7 @@ export function TerminalNode({
       aria-label={start ? "Início do fluxo" : "Fim do fluxo"}
     >
       {!start && (
-        <Handle type="target" position={Position.Top} isConnectable={false} />
+        <Handle type="target" position={Position.Left} isConnectable={false} />
       )}
       {start ? (
         <span className="start-ball" />
@@ -309,12 +309,22 @@ export function TerminalNode({
       )}
       <strong>{start ? "Início" : "Fim"}</strong>
       {start && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          isConnectable={false}
-        />
+        <Handle type="source" position={Position.Right} isConnectable={false} />
       )}
     </div>
+  );
+}
+
+export function PlaceholderNode() {
+  return (
+    <button
+      className="placeholder-node nodrag"
+      onClick={() => useWorkflowStore.setState({ palette: {} })}
+    >
+      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Plus size={24} />
+      Adicionar ação
+      <Handle type="source" position={Position.Right} isConnectable={false} />
+    </button>
   );
 }

@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class IDesktopAutomationDriver(Protocol):
+    def execute(self, action: str, config: dict, node_id: str) -> dict: ...
+    def close(self) -> None: ...

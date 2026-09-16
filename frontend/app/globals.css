@@ -597,6 +597,7 @@ kbd {
   color: var(--muted);
 }
 .action-node {
+  line-height: 14px;
   width: 290px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -604,6 +605,7 @@ kbd {
   box-shadow: 0 3px 8px #18254a06;
   position: relative;
   border-top: 2px solid var(--accent);
+  border-bottom-width: 2px;
 }
 .action-node.selected {
   border-color: var(--accent);
@@ -717,12 +719,7 @@ kbd {
   z-index: 5;
   opacity: 0;
 }
-.node-add.before {
-  top: -24px;
-}
-.node-add.after {
-  bottom: -24px;
-}
+
 .action-node:hover .node-add,
 .action-node:focus-within .node-add {
   opacity: 1;
@@ -1293,5 +1290,41 @@ input[type="range"] {
   color: var(--primary);
   padding: 3px 6px;
   border-radius: 5px;
+  background: var(--bg);
+}
+
+.node-add {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.node-add.before {
+  left: -24px;
+}
+.node-add.after {
+  left: auto;
+  right: -24px;
+  bottom: auto;
+}
+.placeholder-node {
+  pointer-events: all;
+  width: 200px;
+  height: 90px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  position: relative;
+}
+
+.editor-loading {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
   background: var(--bg);
 }

@@ -10,3 +10,7 @@ __pycache__/
 Thumbs.db
 
 .env
+# Persistência local; mantenha somente a estrutura versionada.
+database/**/*
+!database/**/
+!database/**/.gitkeep

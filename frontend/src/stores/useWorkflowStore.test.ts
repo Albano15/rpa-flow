@@ -40,7 +40,7 @@ describe("operações atômicas do editor", () => {
       new Set(
         linearDiagram(w)
           .nodes.filter((n) => n.type === "action")
-          .map((n) => n.position.y),
+          .map((n) => n.position.x),
       ).size,
     ).toBe(3);
     expect(exportWorkflow(w).nodes[1].id).toBe(w.nodes[2].id);
@@ -231,4 +231,27 @@ it("impede agrupamento de ações não consecutivas sem alterar a execução", (
   store.getState().group();
   expect(store.getState().notice).toContain("ações consecutivas");
   expect(exportWorkflow(activeWorkflow(store.getState()))).toEqual(before);
+});
+
+it("a conexão da última seção ao fim insere a etapa fora da seção", () => {
+  store.getState().addScope();
+  let w = activeWorkflow(store.getState());
+  const section = w.nodes.at(-1)!;
+  for (const node of w.nodes.filter((n) => n.type === "action"))
+    store.getState().moveBlock(node.id, section.id);
+  w = activeWorkflow(store.getState());
+  const insertion = linearDiagram(w).edges.at(-1)!.data!.insertion;
+  store.setState({
+    palette: insertion as import("./useWorkflowStore").Insertion,
+  });
+  store.getState().add("desktop.wait_delay");
+  w = activeWorkflow(store.getState());
+  expect(w.nodes.at(-1)!.parentId).toBeUndefined();
+  expect(
+    linearDiagram(w).nodes.find((n) => n.id === w.nodes.at(-1)!.id)!.position.x,
+  ).toBeGreaterThan(
+    Number(
+      linearDiagram(w).nodes.find((n) => n.id === section.id)!.style!.width,
+    ),
+  );
 });
