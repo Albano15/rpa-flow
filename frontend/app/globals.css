@@ -1239,3 +1239,59 @@ input[type="range"] {
   height: 14px;
   margin: 0;
 }
+.terminal-node {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  position: relative;
+  color: var(--text);
+}
+.terminal-node strong {
+  font-size: 11px;
+}
+.start-ball {
+  width: 30px;
+  height: 30px;
+  background: #22c55e;
+  border: 3px solid #bbf7d0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px #22c55e12;
+}
+.terminal-node.end svg {
+  color: var(--text);
+}
+.move-handle {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  cursor: grab;
+  flex-shrink: 0;
+}
+.move-handle:active {
+  cursor: grabbing;
+}
+.scope-node {
+  position: relative;
+}
+.scope-header input:not(.color-input) {
+  min-width: 0;
+  flex: 1;
+  width: 0;
+}
+.scope-add {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--primary);
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--bg);
+}

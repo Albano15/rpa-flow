@@ -9,7 +9,11 @@ import {
   type Connection,
   type XYPosition,
 } from "@xyflow/react";
-import dagre from "@dagrejs/dagre";
+import {
+  linearDiagram,
+  orderedActions,
+  sequenceEdges,
+} from "../lib/linearLayout";
 import {
   createWorkflow,
   createNode,
@@ -21,6 +25,7 @@ import {
   type ActionData,
 } from "../types/workflow";
 export type Insertion = {
+  scopeId?: string;
   edgeId?: string;
   nodeId?: string;
   side?: "before" | "after";
@@ -49,6 +54,7 @@ type State = {
   createFile: (kind: Workflow["kind"], folderId?: string) => void;
   deleteFile: (id: string) => void;
   moveIntoScope: (id: string) => void;
+  moveBlock: (id: string, parentId?: string, beforeId?: string) => void;
 };
 const initial = createWorkflow("Emissão de nota fiscal");
 initial.id = "wf_faturamento";
@@ -112,82 +118,41 @@ export const useWorkflowStore = create<State>()(
             if (!s.tabs.includes(id)) s.tabs.push(id);
           }
         }),
-      add: (type, position) => {
+      add: (type) => {
         const insertion = get().palette;
-        let insertionAnchor: string | undefined;
         get().edit((w) => {
+          const ordered = orderedActions(w).map((n) => n.id);
           const anchor = w.nodes.find((n) => n.id === insertion?.nodeId);
-          let old = w.edges.find((e) => e.id === insertion?.edgeId);
-          if (anchor)
-            old = w.edges.find((e) =>
-              insertion?.side === "before"
-                ? e.target === anchor.id
-                : e.source === anchor.id,
+          const old = w.edges.find((e) => e.id === insertion?.edgeId);
+          let index = ordered.length;
+          if (old) index = ordered.indexOf(old.target);
+          else if (anchor) {
+            const members = ordered.filter(
+              (id) => id === anchor.id || isWithin(w, id, anchor.id),
             );
-          if (!old && !anchor) {
-            const tail = w.nodes.findLast(
-              (n) =>
-                n.type === "action" && !w.edges.some((e) => e.source === n.id),
+            if (members.length)
+              index =
+                ordered.indexOf(
+                  insertion?.side === "before" ? members[0] : members.at(-1)!,
+                ) + (insertion?.side === "before" ? 0 : 1);
+          } else if (insertion?.scopeId) {
+            const members = ordered.filter((id) =>
+              isWithin(w, id, insertion.scopeId!),
             );
-            if (tail) insertionAnchor = tail.id;
+            if (members.length) index = ordered.indexOf(members.at(-1)!) + 1;
           }
-          const source = w.nodes.find((n) => n.id === old?.source);
-          const n = createNode(
-            type,
-            position ?? {
-              x: source?.position.x ?? anchor?.position.x ?? 100,
-              y:
-                (source?.position.y ??
-                  anchor?.position.y ??
-                  Math.max(-180, ...w.nodes.map((n) => n.position.y))) + 230,
-            },
-          );
-          if (source?.parentId || anchor?.parentId)
-            n.parentId = source?.parentId ?? anchor?.parentId;
-          if (anchor && insertion?.side === "before" && !old && !position)
-            n.position = { ...anchor.position };
-          if (!position) {
-            const parent = w.nodes.find((p) => p.id === n.parentId);
-            for (const existing of w.nodes) {
-              if (
-                existing.parentId === n.parentId &&
-                existing.position.y >= n.position.y
-              )
-                existing.position.y += 230;
-              else if (
-                parent &&
-                !existing.parentId &&
-                existing.id !== parent.id &&
-                existing.position.y >= parent.position.y + n.position.y
-              )
-                existing.position.y += 230;
-            }
-            if (parent)
-              parent.style = {
-                ...parent.style,
-                height: Math.max(
-                  Number(parent.style?.height ?? 0) + 230,
-                  n.position.y + 210,
-                ),
-              };
-          }
+          const n = createNode(type, { x: 0, y: 0 });
+          n.parentId =
+            insertion?.scopeId ??
+            (anchor?.type === "scope" ? anchor.parentId : anchor?.parentId) ??
+            w.nodes.find((n) => n.id === old?.target)?.parentId;
           w.nodes.forEach((n) => {
             n.selected = false;
           });
           n.selected = true;
           w.nodes.push(n);
-          if (old) {
-            w.edges = w.edges.filter((e) => e.id !== old.id);
-            w.edges.push(edge(old.source, n.id), edge(n.id, old.target));
-          } else if (insertionAnchor) {
-            w.edges.push(edge(insertionAnchor, n.id));
-          } else if (anchor) {
-            w.edges.push(
-              insertion?.side === "before"
-                ? edge(n.id, anchor.id)
-                : edge(anchor.id, n.id),
-            );
-          }
+          ordered.splice(index, 0, n.id);
+          sequenceEdges(w, ordered);
         });
         set({ palette: null });
       },
@@ -213,6 +178,11 @@ export const useWorkflowStore = create<State>()(
           w.edges.push(edge(c.source, c.target));
         }),
       nodesChanged: (changes) => {
+        const ids = new Set(activeWorkflow(get()).nodes.map((node) => node.id));
+        changes = changes.filter(
+          (change) => !("id" in change) || ids.has(change.id),
+        );
+        if (!changes.length) return;
         const visual = changes.every(
           (c) => c.type === "select" || c.type === "dimensions",
         );
@@ -256,6 +226,7 @@ export const useWorkflowStore = create<State>()(
             id: uid("section"),
             type: "scope",
             position,
+            parentId: get().palette?.scopeId,
             selected: true,
             style: { width: 420, height: 320 },
             data: {
@@ -276,6 +247,21 @@ export const useWorkflowStore = create<State>()(
           set({
             notice:
               "Selecione ao menos duas ações sem seção usando Shift + clique.",
+          });
+          return;
+        }
+        const workflow = activeWorkflow(get());
+        const sequence = orderedActions(workflow);
+        const selectedIndexes = sequence.flatMap((node, index) =>
+          node.selected && !node.parentId ? [index] : [],
+        );
+        if (
+          selectedIndexes.at(-1)! - selectedIndexes[0] + 1 !==
+          selectedIndexes.length
+        ) {
+          set({
+            notice:
+              "Selecione ações consecutivas para agrupar e preservar a ordem do fluxo.",
           });
           return;
         }
@@ -313,54 +299,52 @@ export const useWorkflowStore = create<State>()(
             n.position = { x: n.position.x - x, y: n.position.y - y };
             n.selected = false;
           });
+          sequenceEdges(
+            w,
+            linearDiagram(w)
+              .nodes.filter((n) => n.type === "action")
+              .map((n) => n.id),
+          );
         });
       },
       layout: () =>
         get().edit((w) => {
-          const graph = new dagre.graphlib.Graph()
-            .setGraph({ rankdir: "TB", ranksep: 85, nodesep: 70 })
-            .setDefaultEdgeLabel(() => ({}));
-          w.nodes
-            .filter((n) => n.type === "action")
-            .forEach((n) => graph.setNode(n.id, { width: 290, height: 170 }));
-          w.edges.forEach((e) => graph.setEdge(e.source, e.target));
-          dagre.layout(graph);
-          w.nodes
-            .filter((n) => n.type === "action")
-            .forEach((n) => {
-              const p = graph.node(n.id);
-              n.position = { x: p.x - 145, y: p.y - 85 };
-            });
-          for (const scope of w.nodes
-            .filter((n) => n.type === "scope")
-            .sort((a, b) => depth(w, b.id) - depth(w, a.id))) {
-            const children = w.nodes.filter((n) => n.parentId === scope.id);
-            if (!children.length) continue;
-            const x = Math.min(...children.map((n) => n.position.x)) - 35,
-              y = Math.min(...children.map((n) => n.position.y)) - 65;
-            scope.position = { x, y };
-            scope.style = {
-              width:
-                Math.max(
-                  ...children.map(
-                    (n) => n.position.x + Number(n.style?.width ?? 290),
-                  ),
-                ) -
-                x +
-                35,
-              height:
-                Math.max(
-                  ...children.map(
-                    (n) => n.position.y + Number(n.style?.height ?? 170),
-                  ),
-                ) -
-                y +
-                35,
-            };
-            children.forEach((n) => {
-              n.position = { x: n.position.x - x, y: n.position.y - y };
-            });
+          const diagram = linearDiagram(w);
+          for (const node of w.nodes) {
+            const arranged = diagram.nodes.find((n) => n.id === node.id)!;
+            node.position = arranged.position;
+            if (node.type === "scope") node.style = arranged.style;
           }
+        }),
+      moveBlock: (id, parentId, beforeId) =>
+        get().edit((w) => {
+          const node = w.nodes.find((n) => n.id === id);
+          if (
+            !node ||
+            parentId === id ||
+            (parentId && isWithin(w, parentId, id))
+          )
+            return;
+          if (
+            parentId &&
+            w.nodes.find((n) => n.id === parentId)?.type !== "scope"
+          )
+            return;
+          const ordered = orderedActions(w).map((n) => n.id);
+          const moving = ordered.filter((n) => n === id || isWithin(w, n, id));
+          const rest = ordered.filter((n) => !moving.includes(n));
+          const before = w.nodes.find((n) => n.id === beforeId);
+          const target =
+            before &&
+            rest.find((n) => n === before.id || isWithin(w, n, before.id));
+          let index = target ? rest.indexOf(target) : rest.length;
+          if (!target && parentId) {
+            const members = rest.filter((n) => isWithin(w, n, parentId));
+            if (members.length) index = rest.indexOf(members.at(-1)!) + 1;
+          }
+          node.parentId = parentId;
+          rest.splice(index, 0, ...moving);
+          sequenceEdges(w, rest);
         }),
       createFile: (kind, folderId = "root") => {
         const w = createWorkflow(

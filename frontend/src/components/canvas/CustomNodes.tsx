@@ -7,7 +7,7 @@ import {
   type Node,
   BaseEdge,
   EdgeLabelRenderer,
-  getBezierPath,
+  getStraightPath,
   type EdgeProps,
 } from "@xyflow/react";
 import * as Switch from "@radix-ui/react-switch";
@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronUp,
   StickyNote,
+  GripVertical,
 } from "lucide-react";
 import {
   catalog,
@@ -99,6 +100,7 @@ export const ActionNode = memo(function ActionNode({
         <Plus size={13} />
       </button>
       <div className="node-heading">
+        <MoveHandle id={id} />
         <span className="action-icon">
           <ActionIcon action={data.action} />
         </span>
@@ -168,6 +170,7 @@ export function GroupNode({ id, data }: NodeProps<Node<ScopeData, "scope">>) {
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div className="scope-header">
+        <MoveHandle id={id} />
         <span className="scope-dot" />
         <input
           aria-label="Nome da seção"
@@ -206,12 +209,19 @@ export function GroupNode({ id, data }: NodeProps<Node<ScopeData, "scope">>) {
         </button>
       </div>
       {data.collapsed && <p>Seção minimizada</p>}
+      <button
+        className="scope-add nodrag"
+        title="Adicionar dentro da seção"
+        onClick={() => useWorkflowStore.setState({ palette: { scopeId: id } })}
+      >
+        <Plus size={14} /> Adicionar à seção
+      </button>
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
   );
 }
 export function InsertEdge(props: EdgeProps) {
-  const [path, x, y] = getBezierPath(props);
+  const [path, x, y] = getStraightPath(props);
   return (
     <>
       <BaseEdge path={path} markerEnd={props.markerEnd} style={props.style} />
@@ -223,12 +233,88 @@ export function InsertEdge(props: EdgeProps) {
             transform: `translate(-50%, -50%) translate(${x}px,${y}px)`,
           }}
           onClick={() =>
-            useWorkflowStore.setState({ palette: { edgeId: props.id } })
+            useWorkflowStore.setState({
+              palette: (props.data
+                ?.insertion as import("../../stores/useWorkflowStore").Insertion) ?? {
+                edgeId: props.id,
+              },
+            })
           }
         >
           <Plus size={14} />
         </button>
       </EdgeLabelRenderer>
     </>
+  );
+}
+
+function MoveHandle({ id }: { id: string }) {
+  return (
+    <span
+      className="move-handle nodrag"
+      draggable
+      role="button"
+      tabIndex={0}
+      aria-label="Arrastar para reordenar ou mover para seção"
+      title="Arrastar para reordenar ou mover para seção"
+      onDragStart={(event) => {
+        event.dataTransfer.setData("application/rpa-node", id);
+        event.dataTransfer.effectAllowed = "move";
+      }}
+    >
+      <GripVertical size={14} />
+    </span>
+  );
+}
+export function TerminalNode({
+  data,
+}: NodeProps<Node<{ kind: "start" | "end" }, "terminal">>) {
+  const start = data.kind === "start";
+  return (
+    <div
+      className={`terminal-node ${start ? "start" : "end"}`}
+      aria-label={start ? "Início do fluxo" : "Fim do fluxo"}
+    >
+      {!start && (
+        <Handle type="target" position={Position.Top} isConnectable={false} />
+      )}
+      {start ? (
+        <span className="start-ball" />
+      ) : (
+        <svg width="32" height="32" viewBox="0 0 36 36" aria-hidden="true">
+          <path d="M6 3v30" stroke="currentColor" strokeWidth="2.5" />
+          <rect
+            x="7"
+            y="4"
+            width="24"
+            height="18"
+            fill="white"
+            stroke="currentColor"
+          />
+          {[0, 1, 2].flatMap((row) =>
+            [0, 1, 2, 3]
+              .filter((col) => (row + col) % 2 === 0)
+              .map((col) => (
+                <rect
+                  key={`${row}-${col}`}
+                  x={7 + col * 6}
+                  y={4 + row * 6}
+                  width="6"
+                  height="6"
+                  fill="currentColor"
+                />
+              )),
+          )}
+        </svg>
+      )}
+      <strong>{start ? "Início" : "Fim"}</strong>
+      {start && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          isConnectable={false}
+        />
+      )}
+    </div>
   );
 }

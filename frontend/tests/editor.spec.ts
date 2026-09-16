@@ -18,7 +18,7 @@ test("editor: propriedades, inserção, histórico, exportação e persistência
   );
   await page.locator(".action-node").first().getByRole("switch").click();
   await expect(page.locator(".action-node").first()).toContainText("Inativo");
-  await page.locator(".edge-add").first().click();
+  await page.locator(".edge-add").nth(1).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: /Aguardar Tempo/ })
@@ -95,7 +95,7 @@ test("exclusão reconecta; valores, tópicos e sincronização manual", async ({
   await page.locator(".action-node").nth(1).click();
   await page.keyboard.press("Delete");
   await expect(page.locator(".action-node")).toHaveCount(2);
-  await expect(page.locator(".edge-add")).toHaveCount(1);
+  await expect(page.locator(".edge-add")).toHaveCount(3);
   await page.locator(".action-node").first().click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Renomear" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Ativar / inativar" }).click();
@@ -147,4 +147,91 @@ test("exclusão reconecta; valores, tópicos e sincronização manual", async ({
     page.getByText("Sincronizado com backend", { exact: true }),
   ).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("início, fim e sub-rotinas permanecem alinhados com conexões retas", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByLabel("Início do fluxo", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Fim do fluxo", { exact: true })).toBeVisible();
+  await page.locator(".add-step").click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Sub-rotina Reutilize/ })
+    .click();
+  await expect(page.locator(".action-node")).toHaveCount(4);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(5);
+  await expect(page.locator(".react-flow__edge").last()).toHaveAttribute(
+    "data-id",
+    /__flow_end__/,
+  );
+  const paths = await page
+    .locator(".react-flow__edge-path")
+    .evaluateAll((elements) => elements.map((el) => el.getAttribute("d")!));
+  for (const path of paths) {
+    expect(path).not.toMatch(/[CQ]/);
+    const numbers = path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+    expect(numbers[0]).toBeCloseTo(numbers[2], 2);
+    expect(numbers[3]).toBeGreaterThan(numbers[1]);
+  }
+  const centers = await page
+    .locator(".action-node, .terminal-node")
+    .evaluateAll((elements) =>
+      elements.map((el) => {
+        const b = el.getBoundingClientRect();
+        return b.x + b.width / 2;
+      }),
+    );
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(1);
+  await page.screenshot({ path: "/tmp/flowbot-linear.png" });
+});
+
+test("seção cresce automaticamente e arrastar uma etapa define apenas sua posição na sequência", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".action-node")).toHaveCount(3);
+  await page.locator(".add-step").click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Seção — organizar/ })
+    .click();
+  const section = page.locator(".scope-node");
+  await expect(section).toBeVisible();
+  const before = await section.boundingBox();
+  await section.getByTitle("Adicionar dentro da seção").click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Sub-rotina Reutilize/ })
+    .click();
+  await expect(page.locator(".action-node")).toHaveCount(4);
+  await expect
+    .poll(async () => (await section.boundingBox())!.height)
+    .toBeGreaterThan(before!.height);
+  const handle = page
+    .locator(".action-node")
+    .first()
+    .getByTitle("Arrastar para reordenar ou mover para seção");
+  await handle.dragTo(section, { targetPosition: { x: 10, y: 75 } });
+  await expect
+    .poll(async () =>
+      page.locator(".action-node").evaluateAll((elements) => {
+        const section = document
+          .querySelector(".scope-node")!
+          .getBoundingClientRect();
+        return elements.filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.top >= section.top && b.bottom <= section.bottom;
+        }).length;
+      }),
+    )
+    .toBe(2);
+  await section.getByTitle("Minimizar seção").click();
+  await expect(page.locator(".action-node")).toHaveCount(2);
+  await section.getByTitle("Expandir seção").click();
+  await expect(page.locator(".action-node")).toHaveCount(4);
+  await page.screenshot({ path: "/tmp/flowbot-linear-section.png" });
 });

@@ -37,8 +37,6 @@ import { useStore } from "zustand";
 import {
   activeWorkflow,
   isWithin,
-  beginDrag,
-  endDrag,
   useWorkflowStore,
 } from "../../stores/useWorkflowStore";
 import {
@@ -50,14 +48,23 @@ import {
   type Folder,
 } from "../../types/workflow";
 import { exportFiles } from "../../lib/files";
-import { ActionNode, GroupNode, InsertEdge } from "./CustomNodes";
+import {
+  linearDiagram,
+  orderedActions,
+  sequenceEdges,
+} from "../../lib/linearLayout";
+import { ActionNode, GroupNode, InsertEdge, TerminalNode } from "./CustomNodes";
 import { FileExplorer } from "../sidebar/FileExplorer";
 import { NodeProperties } from "../sidebar/NodeProperties";
 import { ActionPalette } from "../sidebar/ActionPalette";
 import { ScreenSnipModal } from "../modals/ScreenSnipModal";
 import { VariableManagerModal } from "../modals/VariableManagerModal";
 import "@xyflow/react/dist/style.css";
-const nodeTypes = { action: ActionNode, scope: GroupNode };
+const nodeTypes = {
+  action: ActionNode,
+  scope: GroupNode,
+  terminal: TerminalNode,
+};
 const edgeTypes = { insert: InsertEdge };
 const storageKey = "flowbot.workspace.v1";
 function Editor() {
@@ -140,6 +147,12 @@ function Editor() {
           )
         )
           throw new Error();
+        parsed.workflows.forEach((w) =>
+          sequenceEdges(
+            w,
+            orderedActions(w).map((n) => n.id),
+          ),
+        );
         useWorkflowStore.setState({ ...parsed, tabs: [parsed.activeId] });
       }
     } catch {
@@ -232,34 +245,47 @@ function Editor() {
     );
     return () => clearTimeout(timer);
   }, [ready, w.id, w.nodes.length, rf]);
-  const visibleId = (id: string): string => {
-    const node = w.nodes.find((n) => n.id === id);
-    if (!node?.parentId) return id;
-    const parent = w.nodes.find((n) => n.id === node.parentId);
-    const outer = visibleId(node.parentId);
-    return outer !== node.parentId ||
-      (parent?.type === "scope" && parent.data.collapsed)
-      ? outer
-      : id;
-  };
-  const nodes = w.nodes.map((n) => ({
-    ...n,
-    hidden: visibleId(n.id) !== n.id,
-    ...(n.type === "scope" && n.data.collapsed
-      ? { style: { ...n.style, width: 350, height: 100 } }
-      : {}),
-  }));
-  const edges = w.edges.map((e) => {
-    const source = visibleId(e.source),
-      target = visibleId(e.target);
-    return {
-      ...e,
-      source,
-      target,
-      hidden: source === target,
-      type: source !== e.source || target !== e.target ? "default" : "insert",
+  const { nodes, edges } = linearDiagram(w);
+  const dropTarget = (point: { x: number; y: number }, movingId?: string) => {
+    const absolute = (node: Node): { x: number; y: number } => {
+      const parent = nodes.find((n) => n.id === node.parentId);
+      const pos = parent ? absolute(parent) : { x: 0, y: 0 };
+      return { x: pos.x + node.position.x, y: pos.y + node.position.y };
     };
-  });
+    const scopes = nodes
+      .filter(
+        (n) =>
+          n.type === "scope" &&
+          !n.hidden &&
+          n.id !== movingId &&
+          !(movingId && isWithin(w, n.id, movingId)),
+      )
+      .reverse();
+    const parent = scopes.find((n) => {
+      const p = absolute(n);
+      return (
+        point.x >= p.x &&
+        point.x <= p.x + Number(n.style?.width) &&
+        point.y >= p.y + 35 &&
+        point.y <= p.y + Number(n.style?.height)
+      );
+    });
+    const before = nodes.find(
+      (n) =>
+        n.type !== "terminal" &&
+        !n.hidden &&
+        n.id !== movingId &&
+        !(movingId && isWithin(w, n.id, movingId)) &&
+        n.parentId === parent?.id &&
+        absolute(n).y +
+          (n.type === "scope"
+            ? Number(n.style?.height)
+            : (n.measured?.height ?? 170)) /
+            2 >
+          point.y,
+    );
+    return { parentId: parent?.id, beforeId: before?.id };
+  };
   const exportJSON = async () => {
     try {
       await exportFiles(w, s.workflows, s.assets);
@@ -437,6 +463,7 @@ function Editor() {
                 edgeTypes={edgeTypes}
                 onNodeContextMenu={(event, node) => {
                   event.preventDefault();
+                  if (node.type === "terminal") return;
                   setContext({
                     id: node.id,
                     x: Math.min(event.clientX, window.innerWidth - 240),
@@ -454,12 +481,9 @@ function Editor() {
                   s.nodesChanged(c as Parameters<typeof s.nodesChanged>[0])
                 }
                 onEdgesChange={s.edgesChanged}
-                onConnect={s.connect}
-                onNodeDragStart={beginDrag}
-                onNodeDragStop={(_, n) => {
-                  s.moveIntoScope(n.id);
-                  endDrag();
-                }}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                edgesReconnectable={false}
                 onNodeDoubleClick={(_, n) => {
                   const node = n as FlowNode;
                   if (
@@ -481,22 +505,37 @@ function Editor() {
                 colorMode={s.dark ? "dark" : "light"}
                 onDragOver={(e) => {
                   e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
+                  e.dataTransfer.dropEffect = e.dataTransfer.types.includes(
+                    "application/rpa-node",
+                  )
+                    ? "move"
+                    : "copy";
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
+                  const movingId = e.dataTransfer.getData(
+                    "application/rpa-node",
+                  );
+                  const target = dropTarget(
+                    rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+                    movingId,
+                  );
+                  if (movingId) {
+                    s.moveBlock(movingId, target.parentId, target.beforeId);
+                    return;
+                  }
                   const type = e.dataTransfer.getData(
                     "application/rpa-action",
                   ) as ActionType;
-                  if (String(type) === "flow.section")
-                    s.addScope(
-                      rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
-                    );
-                  else if (actionTypes.includes(type))
-                    s.add(
-                      type,
-                      rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
-                    );
+                  useWorkflowStore.setState({
+                    palette: {
+                      scopeId: target.parentId,
+                      nodeId: target.beforeId,
+                      side: "before",
+                    },
+                  });
+                  if (String(type) === "flow.section") s.addScope();
+                  else if (actionTypes.includes(type)) s.add(type);
                 }}
               >
                 <Background
@@ -516,23 +555,6 @@ function Editor() {
                     <Monitor size={13} /> WEB & DESKTOP <span>v1.0.0</span>
                   </div>
                 </Panel>
-                {!w.nodes.length && (
-                  <Panel position="top-center">
-                    <div className="canvas-empty">
-                      <Workflow size={36} />
-                      <h2>Grandes fluxos começam com uma etapa.</h2>
-                      <p>Adicione uma ação para criar sua automação.</p>
-                      <button
-                        className="primary"
-                        onClick={() =>
-                          useWorkflowStore.setState({ palette: {} })
-                        }
-                      >
-                        <Plus size={16} /> Adicionar primeira etapa
-                      </button>
-                    </div>
-                  </Panel>
-                )}
               </ReactFlow>
             )}
           </div>
@@ -543,7 +565,7 @@ function Editor() {
               <span className="muted">·</span> {w.edges.length} conexões
             </span>
             <span>
-              <MousePointer2 size={12} /> Shift + clique para selecionar{" "}
+              <MousePointer2 size={12} /> Arraste pela alça para reordenar{" "}
               <span className="toolbar-divider" />
               {zoom}%
             </span>
